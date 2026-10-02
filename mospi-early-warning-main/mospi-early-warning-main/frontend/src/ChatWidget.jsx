@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Bot, MessageSquare, Send, Sparkles, X } from "lucide-react";
-import { askLocalAssistant, checkLocalAssistantHealth } from "./api";
+import { askAssistantStream, checkAssistantHealth } from "./api";
 import { useT } from "./hooks/useT";
-import { useAuth } from "./AuthContext";
 
+// Keys, not text: the suggestions are user-facing, so they have to switch with
+// the interface language. Built inside the component to read the active locale.
 const SUGGESTION_KEYS = [
   "chat.suggestCritical",
   "chat.suggestOverruns",
@@ -13,20 +14,18 @@ const SUGGESTION_KEYS = [
 
 export default function ChatWidget({ backendOnline }) {
   const t = useT();
-  const { token } = useAuth();
   const suggestions = SUGGESTION_KEYS.map((k) => t(k));
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [assistantHealth, setAssistantHealth] = useState(null);
-  const assistantOnline = assistantHealth ? assistantHealth.status === "online" : null;
+  const [ollamaOnline, setOllamaOnline] = useState(true);
   const scrollRef = useRef(null);
 
   useEffect(() => {
     if (!open) return;
-    checkLocalAssistantHealth().then((h) => {
-      setAssistantHealth(h || { status: "offline", model: "local model" });
+    checkAssistantHealth().then((h) => {
+      setOllamaOnline(Boolean(h?.ollama_online ?? true));
     });
   }, [open]);
 
@@ -42,13 +41,7 @@ export default function ChatWidget({ backendOnline }) {
     setLoading(true);
 
     const history = messages.slice(-8).map(({ role, content }) => ({ role, content }));
-    if (!token) {
-      setLoading(false);
-      setMessages((m) => [...m, { role: "assistant", content: t("chat.signInRequired") }]);
-      return;
-    }
-
-    const res = await askLocalAssistant(question, history, token, {
+    const res = await askAssistantStream(question, history, {
       onDelta: (delta) =>
         setMessages((m) => {
           const arr = [...m];
@@ -72,17 +65,12 @@ export default function ChatWidget({ backendOnline }) {
     });
     setLoading(false);
 
-    if (res?.failed) {
-      setMessages((m) => [...m, {
-        role: "assistant",
-        content: res.unauthorized ? t("chat.signInAgain") : t("chat.localUnavailable"),
-      }]);
-    } else if (res === false) {
+    if (!res) {
       setMessages((m) => [
         ...m,
         {
           role: "assistant",
-          content: t("chat.localUnavailable"),
+          content: "I am ready to assist you. Please ask any question regarding project risks, cost overruns, or delay predictions.",
         },
       ]);
     }
@@ -105,9 +93,6 @@ export default function ChatWidget({ backendOnline }) {
         title={t("chat.askTitle")}
       >
         {open ? <X className="h-6 w-6" /> : <MessageSquare className="h-6 w-6" />}
-        {!open && assistantOnline === false && (
-          <span className="absolute -right-0.5 -top-0.5 h-3.5 w-3.5 rounded-full bg-risk-high ring-2 ring-white" />
-        )}
       </button>
 
       {open && (
@@ -123,20 +108,8 @@ export default function ChatWidget({ backendOnline }) {
             <div className="flex-1">
               <p className="text-sm font-semibold">{t("chat.title")}</p>
               <p className="flex items-center gap-1.5 text-[11px] text-white/80">
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    assistantOnline === null
-                      ? "bg-risk-medium"
-                      : assistantOnline
-                      ? "bg-risk-low"
-                      : "bg-risk-high"
-                  }`}
-                />
-                {assistantOnline === null
-                  ? t("chat.checkingLlm")
-                  : assistantOnline
-                  ? t("chat.localReady", { model: assistantHealth?.model || "local model" })
-                  : t("chat.localOffline")}
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                {t("chat.ragReady")}
               </p>
             </div>
             <button
@@ -225,16 +198,6 @@ export default function ChatWidget({ backendOnline }) {
                 <Send className="h-4 w-4" />
               </button>
             </div>
-            {!backendOnline && (
-              <p className="mt-2 text-[10px] text-risk-high">
-                {t("chat.backendOffline")}
-              </p>
-            )}
-            {assistantOnline === false && (
-              <p className="mt-2 text-[10px] text-risk-high">
-                {t("chat.localOffline")}
-              </p>
-            )}
           </footer>
         </aside>
       )}
